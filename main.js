@@ -561,6 +561,15 @@
      ================================================================ */
   const t0 = performance.now();
 
+  /* introStartTime is null until the experience is unlocked
+     (autoplay success or overlay click). The scene animation
+     stays parked off-screen until then.                        */
+  let introStartTime = null;
+
+  window._saunaStartIntro = function () {
+    if (introStartTime === null) introStartTime = performance.now();
+  };
+
   function frame() {
     const t = (performance.now() - t0) * 0.001;   /* seconds */
 
@@ -573,13 +582,14 @@
       `translate(${(eX * 12).toFixed(2)}px, ${(-eY * 8).toFixed(2)}px)`;
 
     /* ── Intro slide-up animation ───────────────────────────────────
-       Over 20 s the horizon (and everything tied to it: ripples,
-       mirage, haze, lightning) eases up from below the screen to its
-       natural position. Cubic ease-out: fast at first, gentle settle. */
+       Starts only after the experience is unlocked (autoplay or click).
+       introStartTime is null until then → scene stays parked at -0.65. */
     const INTRO_DUR = 50.0;
-    const introP = Math.min(t / INTRO_DUR, 1.0);
+    const introT     = introStartTime !== null
+                       ? (performance.now() - introStartTime) * 0.001 : 0;
+    const introP     = Math.min(introT / INTRO_DUR, 1.0);
     const introEased = 1.0 - Math.pow(1.0 - introP, 3.0);
-    const introOff = -0.65 * (1.0 - introEased); /* -0.65 → 0 */
+    const introOff   = -0.65 * (1.0 - introEased); /* -0.65 → 0 */
 
     gl.uniform2f(uRes, canvas.width, canvas.height);
     gl.uniform1f(uTime, t);

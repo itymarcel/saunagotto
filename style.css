@@ -370,6 +370,39 @@ body.no-webgl {
   to   { height: 13px; }
 }
 
+/* ============================================================
+   INTRO OVERLAY
+   ============================================================ */
+#intro-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: opacity 3s ease;
+  background: rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(30px);
+}
+#intro-overlay.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+.overlay-text {
+  color: #fff;
+  font-size: clamp(10px, 1.6vw, 15px);
+  font-weight: bold;
+  letter-spacing: 1.5em;
+  text-transform: uppercase;
+  user-select: none;
+  animation: overlay-breathe 3.5s ease-in-out infinite alternate;
+}
+@keyframes overlay-breathe {
+  from { opacity: 0.35; }
+  to   { opacity: 0.75; }
+}
+
 /* ── SAUNAGOTTO gentle pulse */
 @keyframes sub-breathe {
   from { opacity: 0.65; }

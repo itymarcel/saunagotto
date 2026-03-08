@@ -44,8 +44,40 @@
     </span>
   </button>
 
+  <!-- Intro overlay: visible until autoplay succeeds or user taps -->
+  <div id="intro-overlay">
+    <span class="overlay-text">ELEVATE &#9775; BALANCE</span>
+  </div>
+
   <script src="main.js"></script>
   <script src="sound.js"></script>
   <script src="grain.js"></script>
+
+  <script>
+    /* ── Overlay coordinator ──────────────────────────────────────
+       Hides the overlay and starts the scene animation on either:
+         a) autoplay success (dispatched by sound.js), or
+         b) user click / tap on the overlay.                       */
+    (function () {
+      const overlay = document.getElementById('intro-overlay');
+      let started = false;
+
+      function startExperience() {
+        if (started) return;
+        started = true;
+        overlay.classList.add('hidden');
+        window._saunaStartIntro && window._saunaStartIntro();
+      }
+
+      /* Tap / click: also triggers sound (autoplay path handles it separately) */
+      overlay.addEventListener('click', function () {
+        window._saunaEnableSound && window._saunaEnableSound();
+        startExperience();
+      });
+
+      /* Autoplay succeeded in sound.js */
+      document.addEventListener('sauna:autoplay-ok', startExperience);
+    }());
+  </script>
 </body>
 </html>

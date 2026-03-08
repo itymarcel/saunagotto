@@ -132,4 +132,37 @@
     else            disable();
   });
 
+  /* Expose enable() so the overlay coordinator can call it          */
+  window._saunaEnableSound = enable;
+
+  /* ── Autoplay probe ─────────────────────────────────────────────
+     Try to play a silent clone of the audio file. If the browser
+     allows it (desktop with sufficient media-engagement score),
+     kick off real playback immediately and signal the intro start.
+     On mobile / strict autoplay policies this will reject silently
+     and the overlay stays visible waiting for a tap.              */
+  (function tryAutoplay() {
+    const probe = new Audio('burial.mp3');
+    probe.volume = 0;
+    probe.preload = 'metadata';
+
+    function attempt() {
+      const p = probe.play();
+      if (!p) return; /* legacy API – can't detect, leave overlay up */
+      p.then(function () {
+        probe.pause();
+        enable();
+        document.dispatchEvent(new Event('sauna:autoplay-ok'));
+      }).catch(function () {
+        /* blocked – overlay will handle it */
+      });
+    }
+
+    if (probe.readyState >= 1) {
+      attempt();
+    } else {
+      probe.addEventListener('loadedmetadata', attempt, { once: true });
+    }
+  }());
+
 }());
