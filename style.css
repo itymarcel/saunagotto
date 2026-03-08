@@ -1,0 +1,377 @@
+/* ============================================================
+   RESET & BASE
+   ============================================================ */
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  /* Flexbox handles centering – no transform needed on stage */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* CSS fallback when WebGL is blocked (e.g. Brave fingerprinting shield).
+   JS adds this class to <body> when getContext('webgl') returns null.     */
+body.no-webgl {
+  background: radial-gradient(ellipse at 50% 65%, #1c0700 0%, #000 68%);
+  animation: no-webgl-pulse 5s ease-in-out infinite alternate;
+}
+@keyframes no-webgl-pulse {
+  from { background: radial-gradient(ellipse at 50% 65%, #1c0700 0%, #000 68%); }
+  to   { background: radial-gradient(ellipse at 50% 60%, #240900 0%, #000 62%); }
+}
+
+/* ============================================================
+   WEBGL CANVAS  (full-screen, behind everything)
+   ============================================================ */
+#bg {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  z-index: 0;
+}
+
+/* ============================================================
+   PARALLAX FOREGROUND WRAPPER
+   Receives mouse-driven translate from JS. Sits between body
+   (flex centering) and .stage (sway animation) so the two
+   transforms don't conflict.
+   ============================================================ */
+#parallax-fg {
+  display: flex;          /* shrink-wrap around .stage            */
+  will-change: transform; /* hint compositor for cheap translation */
+}
+
+/* ============================================================
+   STAGE  (centered overlay, floats above canvas)
+   ============================================================ */
+.stage {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  /* Very subtle heat-sway – the transform here creates a stacking
+     context, which actually helps us: mix-blend-mode on children
+     will blend against each other (base + ghosts) inside this
+     context, exactly the chromatic-aberration behaviour we want. */
+  animation: stage-sway 6.7s ease-in-out infinite alternate;
+}
+
+/* ============================================================
+   FLICKER WRAPPER  (sizes itself to the base image)
+   ============================================================ */
+.flicker-wrap {
+  position: relative;   /* anchor for absolutely-placed ghosts */
+  display: block;
+}
+
+/* ============================================================
+   JAPANESE LOGO – shared geometry
+   ============================================================ */
+.logo-jp {
+  display: block;
+  width: clamp(200px, 36vw, 460px);
+  height: auto;
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;
+}
+
+/* Ghosts sit exactly on top of the base, full-size */
+.red,
+.red2,
+.blue,
+.flash {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  opacity: 0;
+}
+
+/* ── TV-grain canvas overlay ────────────────────────────────
+   Sits above all logo layers, blends with overlay mode so it
+   darkens/lightens the logo pixels like real analogue noise.  */
+.grain-container {
+  opacity:0.06;
+}
+.logo-grain {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  mix-blend-mode: overlay;
+  opacity: 0.08;
+  image-rendering: pixelated;
+  z-index: 5;
+  animation: flicker-base 26s linear infinite;
+}
+
+/* ── Base layer ─────────────────────────────────────────────
+   No glow — raw image, hard flicker only.                     */
+.base {
+  animation: flicker-base 26s linear infinite;
+}
+
+/* ── Red chromatic ghost ─────────────────────────────────────
+   Offset +x, bright red-orange, screen-blends against base.   */
+.red {
+  mix-blend-mode: screen;
+  filter:
+    sepia(1) saturate(9) hue-rotate(345deg) brightness(2.2)
+    drop-shadow(0 0 6px rgba(255, 0, 0, 0.7));
+  animation: flicker-red 3.5s linear infinite;
+  animation-delay: -0.4s;
+}
+
+/* ── Red2 chromatic ghost ────────────────────────────────────
+   Deeper saturated crimson, further offset, wider drop-shadow.
+   A distinct second red layer for denser chromatic smearing.   */
+.red2 {
+  mix-blend-mode: screen;
+  filter:
+    sepia(1) saturate(14) hue-rotate(355deg) brightness(1.5)
+    drop-shadow(0 0 10px rgba(200, 10, 10, 0.90));
+  animation: flicker-red2 5.5s linear infinite;
+  animation-delay: -0.9s;
+}
+
+/* ── Blue chromatic ghost ────────────────────────────────────
+   Offset -x, cyan-blue, screen-blends.                        */
+.blue {
+  mix-blend-mode: screen;
+  filter:
+    sepia(1) saturate(9) hue-rotate(168deg) brightness(2.2)
+    drop-shadow(0 0 6px rgba(20, 80, 255, 0.7));
+  animation: flicker-blue 4.2s linear infinite;
+  animation-delay: -1.1s;
+}
+
+/* ── Bright overexposed flash ────────────────────────────────
+   Very rare white burst, slight blur.                          */
+.flash {
+  mix-blend-mode: screen;
+  filter: brightness(8) blur(3px) saturate(0);
+  animation: flicker-flash 8.0s linear infinite;
+  animation-delay: -2.7s;
+}
+
+/* ============================================================
+   SAUNAGOTTO SUB-LOGO
+   ============================================================ */
+.logo-sub {
+  width: clamp(130px, 32vw, 450px);
+  height: auto;
+  opacity: 1;
+  filter: drop-shadow(0 0 10px rgba(255, 140, 50, 0.28));
+  animation: sub-breathe 4.3s ease-in-out infinite alternate;
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;
+}
+
+/* ============================================================
+   KEYFRAMES
+   ============================================================ */
+
+/* ── Base logo: clean blackouts every 4–6 s, ~300 ms each ───── */
+@keyframes flicker-base {
+  0%     { opacity: 1; }
+
+  16.0%  { opacity: 1; }
+  16.1%  { opacity: 0; }
+  17.3%  { opacity: 0; }
+  17.4%  { opacity: 1; }
+
+  34.0%  { opacity: 1; }
+  34.1%  { opacity: 0; }
+  35.4%  { opacity: 0; }
+  35.5%  { opacity: 1; }
+
+  55.6%  { opacity: 1; }
+  55.7%  { opacity: 0; }
+  57.0%  { opacity: 0; }
+  57.1%  { opacity: 1; }
+
+  77.8%  { opacity: 1; }
+  77.9%  { opacity: 0; }
+  79.2%  { opacity: 0; }
+  79.3%  { opacity: 1; }
+
+  95.4%  { opacity: 1; }
+  95.5%  { opacity: 0; }
+  96.8%  { opacity: 0; }
+  96.9%  { opacity: 1; }
+
+  100%   { opacity: 1; }
+}
+
+/* ── Red chromatic ghost  (3.5 s, 2 appearances, fine micro-steps) */
+@keyframes flicker-red {
+  0%      { opacity: 0; transform: translate(0px, 0px); }
+  /* appearance 1 @ 14 % */
+  13.90%  { opacity: 0;    transform: translate(5px, -1px); }
+  14.00%  { opacity: 0.78; transform: translate(5px, -1px); }
+  14.10%  { opacity: 0.44; transform: translate(4px,  0px); }
+  14.20%  { opacity: 0.74; transform: translate(5px, -1px); }
+  14.30%  { opacity: 0.40; transform: translate(4px,  0px); }
+  14.40%  { opacity: 0.68; transform: translate(5px, -1px); }
+  14.50%  { opacity: 0; }
+  /* appearance 2 @ 65 % */
+  64.90%  { opacity: 0;    transform: translate(6px, -2px); }
+  65.00%  { opacity: 0.82; transform: translate(6px, -2px); }
+  65.10%  { opacity: 0.50; transform: translate(5px, -1px); }
+  65.20%  { opacity: 0.76; transform: translate(6px, -2px); }
+  65.30%  { opacity: 0.44; transform: translate(5px, -1px); }
+  65.38%  { opacity: 0; }
+  100%    { opacity: 0; transform: translate(0px,  0px); }
+}
+
+/* ── Red2 ghost  (5.5 s, 2 appearances, lingers with micro-oscillation) */
+@keyframes flicker-red2 {
+  0%      { opacity: 0; transform: translate(0px, 0px); }
+  /* appearance 1 @ 7 %: holds and oscillates */
+  6.90%   { opacity: 0;    transform: translate(8px, -2px); }
+  7.00%   { opacity: 0.85; transform: translate(8px, -2px); }
+  7.10%   { opacity: 0.58; transform: translate(7px, -1px); }
+  7.20%   { opacity: 0.80; transform: translate(8px, -2px); }
+  7.30%   { opacity: 0.52; transform: translate(7px, -1px); }
+  7.40%   { opacity: 0.78; transform: translate(8px, -2px); }
+  7.50%   { opacity: 0.46; transform: translate(7px,  0px); }
+  7.60%   { opacity: 0; }
+  /* appearance 2 @ 61 %: dense micro-cluster */
+  61.00%  { opacity: 0;    transform: translate(9px, -3px); }
+  61.10%  { opacity: 0.88; transform: translate(9px, -3px); }
+  61.20%  { opacity: 0.56; transform: translate(7px, -1px); }
+  61.30%  { opacity: 0.82; transform: translate(8px, -2px); }
+  61.38%  { opacity: 0.44; transform: translate(7px, -1px); }
+  61.46%  { opacity: 0.72; transform: translate(8px, -2px); }
+  61.55%  { opacity: 0; }
+  100%    { opacity: 0; transform: translate(0px,  0px); }
+}
+
+/* ── Blue chromatic ghost  (4.2 s, 2 appearances, fine micro-steps) */
+@keyframes flicker-blue {
+  0%      { opacity: 0; transform: translate(0px, 0px); }
+  /* appearance 1 @ 18 % */
+  17.90%  { opacity: 0;    transform: translate(-5px,  1px); }
+  18.00%  { opacity: 0.72; transform: translate(-5px,  1px); }
+  18.10%  { opacity: 0.40; transform: translate(-6px,  0px); }
+  18.20%  { opacity: 0.68; transform: translate(-5px,  1px); }
+  18.30%  { opacity: 0.36; transform: translate(-6px,  0px); }
+  18.40%  { opacity: 0.64; transform: translate(-5px,  1px); }
+  18.50%  { opacity: 0; }
+  /* appearance 2 @ 72 % */
+  71.90%  { opacity: 0;    transform: translate(-4px, -1px); }
+  72.00%  { opacity: 0.76; transform: translate(-4px, -1px); }
+  72.10%  { opacity: 0.44; transform: translate(-5px, -2px); }
+  72.20%  { opacity: 0.70; transform: translate(-4px, -1px); }
+  72.30%  { opacity: 0.40; transform: translate(-5px, -2px); }
+  72.38%  { opacity: 0; }
+  100%    { opacity: 0; transform: translate(0px,  0px); }
+}
+
+/* ── Bright flash  (8.0 s, very rare — one burst of 4 micro-steps) */
+@keyframes flicker-flash {
+  0%     { opacity: 0; }
+  3.75%  { opacity: 0; }
+  3.88%  { opacity: 0.35; }
+  4.00%  { opacity: 0.10; }
+  4.12%  { opacity: 0.28; }
+  4.20%  { opacity: 0; }
+  100%   { opacity: 0; }
+}
+
+/* ── Stage heat-sway: imperceptible sub-pixel drift */
+@keyframes stage-sway {
+  0%   { transform: translate( 0.0px,  0.0px); }
+  20%  { transform: translate( 0.5px,  0.3px); }
+  40%  { transform: translate(-0.4px,  0.6px); }
+  60%  { transform: translate( 0.6px, -0.3px); }
+  80%  { transform: translate(-0.6px,  0.2px); }
+  100% { transform: translate( 0.3px, -0.5px); }
+}
+
+/* ============================================================
+   SOUND BUTTON
+   ============================================================ */
+#sound-btn {
+  position: fixed;
+  bottom: 15px;
+  right: 15px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  opacity: 0.55;
+  cursor: pointer;
+  padding: 0;
+  user-select: none;
+  transition: opacity 0.2s;
+}
+#sound-btn:hover  { opacity: 1; }
+#sound-btn:disabled { cursor: default; }
+
+/* ── Horizontal line icon ────────────────────────────── */
+.btn-line { display: block; flex-shrink: 0; }
+
+/* ── Equaliser wave bars ─────────────────────────────── */
+.btn-wave {
+  display: none;
+  align-items: flex-end;
+  gap: 2px;
+  width: 18px;
+  height: 13px;
+  flex-shrink: 0;
+}
+.btn-wave span {
+  display: block;
+  width: 2px;
+  height: 3px;
+  background: currentColor;
+  border-radius: 1px;
+}
+
+/* Playing state: swap line → wave, start animations */
+#sound-btn.playing .btn-line  { display: none; }
+#sound-btn.playing .btn-wave  { display: flex; }
+
+#sound-btn.playing .btn-wave span {
+  animation: eq-bar 0.65s ease-in-out infinite alternate;
+}
+#sound-btn.playing .btn-wave span:nth-child(1) { animation-delay: 0.00s; animation-duration: 0.60s; }
+#sound-btn.playing .btn-wave span:nth-child(2) { animation-delay: 0.12s; animation-duration: 0.78s; }
+#sound-btn.playing .btn-wave span:nth-child(3) { animation-delay: 0.04s; animation-duration: 0.52s; }
+#sound-btn.playing .btn-wave span:nth-child(4) { animation-delay: 0.19s; animation-duration: 0.70s; }
+#sound-btn.playing .btn-wave span:nth-child(5) { animation-delay: 0.08s; animation-duration: 0.84s; }
+
+@keyframes eq-bar {
+  from { height: 2px;  }
+  to   { height: 13px; }
+}
+
+/* ── SAUNAGOTTO gentle pulse */
+@keyframes sub-breathe {
+  from { opacity: 0.65; }
+  to   { opacity: 0.95; }
+}
