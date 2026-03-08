@@ -14,7 +14,9 @@ const MIME = {
 };
 
 http.createServer((req, res) => {
-  const urlPath   = req.url.split('?')[0];          /* strip query string */
+  /* decodeURIComponent turns %E7%86%B1%E7%A5%9E.png → 熱神.png so the
+     filesystem lookup matches the actual filename on disk.            */
+  const urlPath   = decodeURIComponent(req.url.split('?')[0]);
   const filePath  = path.join(__dirname, urlPath === '/' ? 'index.html' : urlPath);
   const ext       = path.extname(filePath).toLowerCase();
   const mimeType  = MIME[ext] || 'application/octet-stream';

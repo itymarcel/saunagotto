@@ -58,7 +58,7 @@
      - Three layers: slow wide ripples + medium detail + fast glint.
      ================================================================ */
   const FS = /* glsl */`
-    precision mediump float;
+    precision highp float;   /* mediump lacks precision for star grid on mobile */
 
     uniform vec2  u_res;
     uniform float u_time;

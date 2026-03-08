@@ -87,28 +87,70 @@
   }
 
   /* ── Enable / disable ───────────────────────────────────────────── */
-  async function enable() {
+  function enable() {
     btn.disabled = true;
     label.textContent = 'Loading…';
-    try {
-      buildPlayer(0);
-      buildPlayer(1);
-      isPlaying = true;
 
-      const go = () => playFrom(0);
-      if (P[0].el.readyState >= 1) {
-        go();
-      } else {
-        P[0].el.addEventListener('loadedmetadata', go, { once: true });
+    buildPlayer(0);
+    buildPlayer(1);
+    isPlaying = true;
+
+    const p = P[0];
+    p.el.volume = 0;
+
+    /* ── Mobile-safe play ───────────────────────────────────────────
+       play() MUST be called synchronously within the user-gesture
+       call stack – if we wait for loadedmetadata first, the gesture
+       context has already expired and the browser blocks playback.
+       We call play() now (audio will start from the beginning), then
+       seek to the random offset once duration is known.             */
+    const prom = p.el.play();
+
+    function finishSetup() {
+      if (!isPlaying) return;
+      const dur = p.el.duration;
+      if (dur && isFinite(dur)) {
+        p.el.currentTime = dur * (0.10 + Math.random() * 0.55);
       }
-
-      btn.classList.add('playing');
-      btn.setAttribute('aria-label', 'Disable Sound');
-      label.textContent = 'Disable Sound';
-    } catch (err) {
-      console.error('[sound]', err);
-      label.textContent = 'Enable Sound';
+      fadeVolume(p.el, 0, 1, FADE);
+      p.handoffSet = false;
+      p.el.ontimeupdate = () => {
+        if (!isPlaying || p.handoffSet) return;
+        if (p.el.duration - p.el.currentTime <= FADE + 0.3) {
+          p.handoffSet = true;
+          crossfade(0);
+        }
+      };
     }
+
+    if (prom !== undefined) {
+      prom.then(() => {
+        if (p.el.readyState >= 1 && isFinite(p.el.duration)) {
+          finishSetup();
+        } else {
+          p.el.addEventListener('loadedmetadata', finishSetup, { once: true });
+        }
+      }).catch(err => {
+        /* Blocked (should only happen if called outside gesture context) */
+        console.warn('[sound] play blocked:', err.name);
+        isPlaying = false;
+        btn.classList.remove('playing');
+        btn.setAttribute('aria-label', 'Enable Sound');
+        label.textContent = 'Enable Sound';
+        btn.disabled = false;
+      });
+    } else {
+      /* Old non-Promise audio API */
+      if (p.el.readyState >= 1 && isFinite(p.el.duration)) {
+        finishSetup();
+      } else {
+        p.el.addEventListener('loadedmetadata', finishSetup, { once: true });
+      }
+    }
+
+    btn.classList.add('playing');
+    btn.setAttribute('aria-label', 'Disable Sound');
+    label.textContent = 'Disable Sound';
     btn.disabled = false;
   }
 
