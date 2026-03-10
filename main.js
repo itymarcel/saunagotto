@@ -64,6 +64,7 @@
     uniform float u_time;
     uniform vec2  u_mouse;   /* normalised offset: +x right, +y up [-0.5,0.5] */
     uniform float u_intro;   /* Y-offset added to hz: starts negative, eases to 0 */
+    uniform float u_mobile;  /* 1.0 on touch devices, 0.0 on desktop            */
 
     /* ── Noise ──────────────────────────────────────────────────── */
     float hash(vec2 p) {
@@ -371,7 +372,7 @@
          lazy parallax glide. FBM density field creates clumps (bright
          patches) vs voids – a rough Milky-Way structure.             */
       float starMask  = smoothstep(hz + 0.005, hz + 0.07, uv.y);
-      vec2  starDrift = vec2(u_time * 0.008, u_time * 0.003);
+      vec2  starDrift = vec2(u_time * 0.008, u_time * 0.003) * mix(1.0, 0.50, u_mobile);
       vec2  starUV    = uv + starDrift;
       /* Density field: slow FBM → patches of dense / sparse stars   */
       float dens      = fbm(starUV * 2.5 + 7.3);
@@ -381,7 +382,7 @@
                   + starLayer(starUV * 1.7 + 0.3,  42.0, densityMod * 0.85)
                   + starLayer(starUV * 2.8 + 1.7,  64.0, densityMod * 0.70);
       stars = clamp(stars, 0.0, 1.0);
-      col += vec3(0.80, 0.87, 1.00) * stars * starMask * 0.55;
+      col += vec3(0.80, 0.87, 1.00) * stars * starMask * 0.55 * mix(1.0, 0.40, u_mobile);
 
       /* ── Galaxy patches ──────────────────────────────────────────
          Three blobs: wide Gaussian field drives both a soft diffuse
@@ -398,7 +399,7 @@
 
       /* Diffuse glow – the visually dominant element.
          pow() steepens the falloff: bright core, quick fade.      */
-      col += vec3(0.62, 0.76, 1.00) * pow(galaxyField, 1.5) * starMask * 0.22;
+      col += vec3(0.62, 0.76, 1.00) * pow(galaxyField, 1.5) * starMask * 0.22 * mix(1.0, 0.40, u_mobile);
 
       /* Dense pinpoint stars – gridSizes chosen so cells are
          ≥30 px wide on a 1920 px screen → stars always ≥1 px.
@@ -410,7 +411,7 @@
                      + starLayerSharp(starUV * 2.1 + 1.2,  72.0, galDens * 0.70);
       galStars = clamp(galStars, 0.0, 1.0);
       /* Brightness ramp: center stars 2× brighter than edge stars  */
-      col += vec3(0.90, 0.95, 1.00) * galStars * (0.3 + galaxyField * 1.8) * starMask;
+      col += vec3(0.90, 0.95, 1.00) * galStars * (0.3 + galaxyField * 1.8) * starMask * mix(1.0, 0.40, u_mobile);
 
       /* ── Fata Morgana ────────────────────────────────────────────
          Mirage band just below the curved horizon: sky mirrored
@@ -527,7 +528,9 @@
   const uRes = gl.getUniformLocation(prog, 'u_res');
   const uTime = gl.getUniformLocation(prog, 'u_time');
   const uMouse = gl.getUniformLocation(prog, 'u_mouse');
-  const uIntro = gl.getUniformLocation(prog, 'u_intro');
+  const uIntro  = gl.getUniformLocation(prog, 'u_intro');
+  const uMobile = gl.getUniformLocation(prog, 'u_mobile');
+  const isMobile = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
 
   /* ── Mouse parallax ─────────────────────────────────────────────
      tX/tY  : raw normalised target  (range −0.5 … +0.5)
@@ -595,6 +598,7 @@
     gl.uniform1f(uTime, t);
     gl.uniform2f(uMouse, eX, eY);
     gl.uniform1f(uIntro, introOff);
+    gl.uniform1f(uMobile, isMobile ? 1.0 : 0.0);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     requestAnimationFrame(frame);
   }
