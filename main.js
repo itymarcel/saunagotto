@@ -687,13 +687,7 @@
 
     const t = (performance.now() - t0) * 0.001;   /* seconds */
 
-    /* On mobile, gyro overrides mouse for parallax */
-    if (isMobile && window._gyro && window._gyro.active()) {
-      tX = window._gyro.gamma() * 0.5;
-      tY = -window._gyro.beta() * 0.4;
-    }
-
-    /* Ease toward target */
+    /* Ease mouse toward target */
     eX += (tX - eX) * 0.027;
     eY += (tY - eY) * 0.027;
 

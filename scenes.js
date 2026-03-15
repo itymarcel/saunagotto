@@ -4,6 +4,11 @@
   const SCENE_TRACKS = { 1: 'burial.mp3', 2: 'ocean.mp3', 3: 'sun.mp3' };
   let currentScene = 1;
 
+  /* Width of the prev/next tap zones — matches the CSS (60 px desktop, 40 px mobile) */
+  function zoneW() {
+    return document.getElementById('zone-prev').offsetWidth;
+  }
+
   const transition  = document.getElementById('scene-transition');
   const noiseCanvas = document.getElementById('transition-noise');
   const noiseCtx    = noiseCanvas.getContext('2d');
@@ -68,7 +73,7 @@
     }, 500);
   }
 
-  /* ── Navigation zones (60 px each side, full height) ─────────── */
+  /* ── Navigation zones (60 px desktop / 40 px mobile, full height) */
   document.getElementById('zone-prev').addEventListener('click', function (e) {
     e.stopPropagation();
     goToScene(wrap(currentScene - 1));
@@ -81,7 +86,7 @@
   /* ── Scene 1: mousedown / touchstart → lightning flash ─────────── */
   window.addEventListener('mousedown', function (e) {
     if (currentScene !== 1) return;
-    if (e.clientX < 60 || e.clientX > window.innerWidth - 60) return;
+    if (e.clientX < zoneW() || e.clientX > window.innerWidth - zoneW()) return;
     const x = e.clientX / window.innerWidth;
     const y = 1.0 - (e.clientY / window.innerHeight);
     const isGround = (e.clientY > window.innerHeight * 0.55) ? 1.0 : 0.0;
@@ -92,7 +97,7 @@
     if (currentScene !== 1) return;
     const t = e.touches[0];
     if (!t) return;
-    if (t.clientX < 60 || t.clientX > window.innerWidth - 60) return;
+    if (t.clientX < zoneW() || t.clientX > window.innerWidth - zoneW()) return;
     const x = t.clientX / window.innerWidth;
     const y = 1.0 - (t.clientY / window.innerHeight);
     const isGround = (t.clientY > window.innerHeight * 0.55) ? 1.0 : 0.0;
@@ -104,7 +109,7 @@
   let steamU = 0.5, steamV = 0.5;
 
   function startSteam(clientX, clientY) {
-    if (clientX < 60 || clientX > window.innerWidth - 60) return;
+    if (clientX < zoneW() || clientX > window.innerWidth - zoneW()) return;
     steamU = clientX / window.innerWidth;
     steamV = 1.0 - clientY / window.innerHeight;
     window._saunaCoalSteam && window._saunaCoalSteam(steamU, steamV);
@@ -136,7 +141,7 @@
   });
   window.addEventListener('mousemove', function (e) {
     if (currentScene === 3 && steamInterval) {
-      if (e.clientX >= 60 && e.clientX <= window.innerWidth - 60) {
+      if (e.clientX >= zoneW() && e.clientX <= window.innerWidth - zoneW()) {
         steamU = e.clientX / window.innerWidth;
         steamV = 1.0 - e.clientY / window.innerHeight;
       }
@@ -156,7 +161,7 @@
     if (currentScene !== 3 || !steamInterval) return;
     const touch = e.touches[0];
     if (!touch) return;
-    if (touch.clientX >= 60 && touch.clientX <= window.innerWidth - 60) {
+    if (touch.clientX >= zoneW() && touch.clientX <= window.innerWidth - zoneW()) {
       steamU = touch.clientX / window.innerWidth;
       steamV = 1.0 - touch.clientY / window.innerHeight;
     }
@@ -194,7 +199,7 @@
   /* Mouse */
   window.addEventListener('mousedown', function (e) {
     if (currentScene !== 2) return;
-    if (e.clientX < 60 || e.clientX > window.innerWidth - 60) return;
+    if (e.clientX < zoneW() || e.clientX > window.innerWidth - zoneW()) return;
     onScrubStart(e.clientX);
   });
   window.addEventListener('mousemove', function (e) { onScrubMove(e.clientX); });
@@ -204,7 +209,7 @@
   window.addEventListener('touchstart', function (e) {
     if (currentScene !== 2) return;
     const t = e.touches[0];
-    if (t.clientX < 60 || t.clientX > window.innerWidth - 60) return;
+    if (t.clientX < zoneW() || t.clientX > window.innerWidth - zoneW()) return;
     onScrubStart(t.clientX);
   }, { passive: true });
   window.addEventListener('touchmove', function (e) {
@@ -215,41 +220,6 @@
   window.addEventListener('touchend', function () {
     if (currentScene === 2) onScrubEnd();
   }, { passive: true });
-
-  /* ── Gyro scrub for Scene 2 ─────────────────────────────────────
-     When the phone is tilted left/right (gamma), the ocean scrubs.
-     Past a small dead-zone: pause autoplay and drive frame by tilt.
-     Return to level: resume autoplay.                              */
-  var lastGyroNow  = performance.now();
-  var gyroScrubPos = 0;
-  var gyroTilted   = false;
-
-  (function gyroTick(now) {
-    requestAnimationFrame(gyroTick);
-    var dt = Math.min((now - lastGyroNow) * 0.001, 0.1);
-    lastGyroNow = now;
-
-    if (currentScene !== 2 || scrubbing || !window._gyro || !window._gyro.active()) {
-      if (gyroTilted && currentScene !== 2) gyroTilted = false;
-      return;
-    }
-
-    var g = window._gyro.gamma();
-    if (Math.abs(g) > 0.08) {
-      if (!gyroTilted) {
-        gyroTilted   = true;
-        gyroScrubPos = (window._oceanFrame && window._oceanFrame()) || 0;
-        window._oceanPause && window._oceanPause();
-      }
-      var total = window._oceanTotalFrames || 1;
-      gyroScrubPos += g * 40 * dt;
-      gyroScrubPos  = ((gyroScrubPos % total) + total) % total;
-      window._oceanSeek && window._oceanSeek(gyroScrubPos | 0);
-    } else if (gyroTilted) {
-      gyroTilted = false;
-      window._oceanPlay && window._oceanPlay();
-    }
-  }(performance.now()));
 
   /* Initial scene */
   document.body.dataset.scene = '1';

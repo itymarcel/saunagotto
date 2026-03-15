@@ -240,6 +240,18 @@
     }
   };
 
+  /* ── Pause on screen lock / tab hidden ─────────────────────────
+     visibilitychange fires when the screen locks, the tab is hidden,
+     or the app is backgrounded. Pause all audio immediately; resume
+     on returning only if sound was already playing.               */
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) {
+      P.forEach(function (p) { if (p.el) try { p.el.pause(); } catch (e) {} });
+    } else if (isPlaying) {
+      P.forEach(function (p) { if (p.el) p.el.play().catch(function () {}); });
+    }
+  });
+
   /* ── Autoplay probe ─────────────────────────────────────────────
      Try to play a silent clone of the audio file. If the browser
      allows it (desktop with sufficient media-engagement score),

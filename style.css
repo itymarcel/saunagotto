@@ -78,7 +78,7 @@ body[data-scene="2"] #ocean-canvas  { visibility: visible; pointer-events: auto;
 }
 
 /* ============================================================
-   SCENE NAV ZONES  (invisible 60 px strips on each side)
+   SCENE NAV ZONES  (invisible strips on each side)
    ============================================================ */
 #zone-prev,
 #zone-next {
@@ -92,6 +92,11 @@ body[data-scene="2"] #ocean-canvas  { visibility: visible; pointer-events: auto;
 }
 #zone-prev { left:  0; }
 #zone-next { right: 0; }
+
+@media (max-width: 768px) {
+  #zone-prev,
+  #zone-next { width: 40px; }
+}
 
 /* ============================================================
    PARALLAX FOREGROUND WRAPPER
