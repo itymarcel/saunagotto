@@ -57,7 +57,11 @@
 
       window._saunaSetTrack && window._saunaSetTrack(SCENE_TRACKS[n]);
 
-      if (n === 2 && oceanVideo) oceanVideo.play().catch(function () {});
+      /* Defer play() to next frame so iOS Safari has applied the
+         visibility change before we ask the video to render.     */
+      if (n === 2 && oceanVideo) requestAnimationFrame(function () {
+        oceanVideo.play().catch(function () {});
+      });
 
       currentScene = n;
     }, 250);

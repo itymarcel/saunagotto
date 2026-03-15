@@ -44,8 +44,12 @@ body.no-webgl {
 }
 
 body[data-scene="1"] #bg         { display: block; }
-body[data-scene="2"] #ocean-video { display: block; }
 body[data-scene="3"] #sun-bg      { display: block; }
+
+/* iOS Safari requires the video element to stay in the rendering pipeline
+   (not display:none) so it can buffer and play. Use visibility instead.  */
+#ocean-video                       { display: block; visibility: hidden; pointer-events: none; }
+body[data-scene="2"] #ocean-video  { visibility: visible; pointer-events: auto; }
 
 #ocean-video { object-fit: cover; }
 
