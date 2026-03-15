@@ -30,16 +30,65 @@ body.no-webgl {
 }
 
 /* ============================================================
-   WEBGL CANVAS  (full-screen, behind everything)
+   SCENE BACKGROUNDS  (fixed, behind everything, scene-switched)
    ============================================================ */
-#bg {
+#bg,
+#ocean-video,
+#sun-bg {
   position: fixed;
   inset: 0;
   width: 100%;
   height: 100%;
-  display: block;
   z-index: 0;
+  display: none;  /* hidden unless scene is active */
 }
+
+body[data-scene="1"] #bg         { display: block; }
+body[data-scene="2"] #ocean-video { display: block; }
+body[data-scene="3"] #sun-bg      { display: block; }
+
+#ocean-video { object-fit: cover; }
+
+/* ============================================================
+   SCENE TRANSITION OVERLAY  (TV-noise snap between scenes)
+   ============================================================ */
+#scene-transition {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  z-index: 49;
+  opacity: 0;
+  pointer-events: none;
+  /* No CSS transition — snap on/off instantly like a TV cut */
+}
+#scene-transition.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+/* Canvas fills the overlay; pixelated scaling gives chunky CRT static */
+#transition-noise {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+/* ============================================================
+   SCENE NAV ZONES  (invisible 60 px strips on each side)
+   ============================================================ */
+#zone-prev,
+#zone-next {
+  position: fixed;
+  top: 0;
+  width: 60px;
+  height: 100%;
+  z-index: 10;
+  cursor: pointer;
+  /* transparent — no visual of their own */
+}
+#zone-prev { left:  0; }
+#zone-next { right: 0; }
 
 /* ============================================================
    PARALLAX FOREGROUND WRAPPER
@@ -82,7 +131,7 @@ body.no-webgl {
    ============================================================ */
 .logo-jp {
   display: block;
-  width: clamp(200px, 36vw, 460px);
+  width: clamp(200px, 28vw, 370px);
   height: auto;
   user-select: none;
   -webkit-user-drag: none;
@@ -100,6 +149,24 @@ body.no-webgl {
   height: 100%;
   object-fit: contain;
   opacity: 0;
+}
+
+/* ── Ocean video mask: plays ocean footage through kanji shape ──
+   Sits above the base image, masked to the 熱神.png alpha shape,
+   below the chromatic ghost layers so they screen-blend on top. */
+.logo-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+  -webkit-mask-image: url(熱神.png);
+  mask-image: url(熱神.png);
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
 }
 
 /* ── TV-grain canvas overlay ────────────────────────────────
@@ -171,10 +238,34 @@ body.no-webgl {
 }
 
 /* ============================================================
+   SCENES 2 & 3  — static logo, no flicker, no overlays
+   ============================================================ */
+body[data-scene="2"] .flicker-wrap .base,
+body[data-scene="3"] .flicker-wrap .base {
+  animation: none;
+  opacity: 1;
+}
+body[data-scene="2"] .flicker-wrap .red,
+body[data-scene="2"] .flicker-wrap .red2,
+body[data-scene="2"] .flicker-wrap .blue,
+body[data-scene="2"] .flicker-wrap .flash,
+body[data-scene="3"] .flicker-wrap .red,
+body[data-scene="3"] .flicker-wrap .red2,
+body[data-scene="3"] .flicker-wrap .blue,
+body[data-scene="3"] .flicker-wrap .flash {
+  opacity: 0 !important;
+  animation: none !important;
+}
+body[data-scene="2"] .grain-container,
+body[data-scene="3"] .grain-container {
+  display: none;
+}
+
+/* ============================================================
    SAUNAGOTTO SUB-LOGO
    ============================================================ */
 .logo-sub {
-  width: clamp(160px, 38vw, 540px);
+  width: clamp(130px, 24.3vw, 348px);
   height: auto;
   opacity: 1;
   filter: drop-shadow(0 0 10px rgba(255, 140, 50, 0.28));
@@ -333,7 +424,19 @@ body.no-webgl {
 #sound-btn:disabled { cursor: default; }
 
 /* ── Horizontal line icon ────────────────────────────── */
+/* Hide the text label — icon only */
+.btn-label { display: none; }
+
 .btn-line { display: block; flex-shrink: 0; }
+
+/* Centre sound button on mobile */
+@media (max-width: 768px) {
+  #sound-btn {
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+  }
+}
 
 /* ── Equaliser wave bars ─────────────────────────────── */
 .btn-wave {

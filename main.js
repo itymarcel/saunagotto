@@ -65,6 +65,9 @@
     uniform vec2  u_mouse;   /* normalised offset: +x right, +y up [-0.5,0.5] */
     uniform float u_intro;   /* Y-offset added to hz: starts negative, eases to 0 */
     uniform float u_mobile;  /* 1.0 on touch devices, 0.0 on desktop            */
+    uniform vec2  u_flashPos;   /* UV of click (x 0-1, y 0=bottom)              */
+    uniform float u_flashTime;  /* u_time at click; negative = inactive         */
+    uniform float u_flashType;  /* 0 = atmosphere only, 1 = bolt + atmosphere   */
 
     /* ── Noise ──────────────────────────────────────────────────── */
     float hash(vec2 p) {
@@ -295,6 +298,86 @@
            + boltCol * (boltL + brL) * 0.0; /* TEST: bolts hidden */
     }
 
+    /* ── Click flash ─────────────────────────────────────────────
+       Always produces an atmospheric glow at the click position.
+       For bottom-half clicks (u_flashType=1) also draws a surface
+       bolt from the horizon down to the strike point.             */
+    vec3 clickFlash(vec2 suv, float hz) {
+      if (u_flashTime < 0.0) return vec3(0.0);
+      float dt = u_time - u_flashTime;
+      if (dt < 0.0 || dt > 2.5) return vec3(0.0);
+
+      float boltT = exp(-dt * 16.0);   /* bolt: very fast ~60 ms decay  */
+      float glowT = exp(-dt *  4.0);   /* glow: atmospheric linger      */
+
+      float fX = u_flashPos.x;
+      float fY = u_flashPos.y;
+
+      /* ── Atmospheric glow ──────────────────────────────────────
+         Sky click → glow at exact click position.
+         Ground click → glow just above horizon at click X.       */
+      float atmoY  = (u_flashType > 0.5) ? (hz + 0.09) : fY;
+      vec2  gd     = suv - vec2(fX, atmoY);
+      float atmo   = exp(-(gd.x * gd.x * 4.5 + gd.y * gd.y * 7.0));
+      float skyMk  = smoothstep(hz - 0.02, hz + 0.06, suv.y);
+
+      vec3 atmoTint = mix(vec3(0.80, 0.72, 1.00), vec3(1.00, 1.00, 1.00), boltT);
+      vec3 result   = atmoTint * atmo * skyMk * glowT * 3.0;
+
+      /* Brief full-sky wash */
+      result += vec3(0.50, 0.42, 0.75) * boltT * 0.30 * skyMk;
+
+      /* ── Surface bolt (ground clicks only) ─────────────────────
+         Jagged bolt from horizon down to click Y.               */
+      if (u_flashType > 0.5) {
+        float boltTop  = hz - 0.01;
+        float boltBot  = fY;
+        float bh       = boltTop - boltBot;
+
+        if (bh > 0.02) {
+          float segH     = bh / 28.0;
+          float boltDist = 1000.0;
+          vec2  prevPt   = vec2(fX, boltTop);
+
+          for (int k = 0; k < 28; k++) {
+            float fk   = float(k);
+            float amp  = 0.5 + hash(vec2(fk * 3.73 + u_flashTime, 15.1)) * 1.5;
+            float defl = (hash(vec2(fk * 7.31, u_flashTime + 10.3)) - 0.5) * 0.020 * amp;
+            vec2  nPt  = vec2(prevPt.x + defl, prevPt.y - segH);
+
+            vec2  ab  = nPt - prevPt;
+            vec2  ap  = suv - prevPt;
+            float tSg = clamp(dot(ap, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
+            boltDist  = min(boltDist, length(ap - tSg * ab));
+            prevPt    = nPt;
+          }
+
+          float inB   = step(boltBot, suv.y) * step(suv.y, boltTop);
+          float relY  = clamp((boltTop - suv.y) / bh, 0.0, 1.0);
+          float taper = sin(relY * 3.14159);
+
+          float boltL = (smoothstep(0.0006, 0.00005, boltDist)
+                       + smoothstep(0.0025, 0.0002,  boltDist) * 0.22)
+                       * taper * inB * boltT;
+          float bHalo = (exp(-boltDist * 20.0) * 0.60
+                       + exp(-boltDist *  5.5) * 0.30)
+                       * taper * inB * boltT;
+
+          result += vec3(0.92, 0.88, 1.00) * boltL * 2.5;
+          result += vec3(0.60, 0.48, 0.88) * bHalo;
+
+          /* Ground impact burst */
+          float sdx = suv.x - fX;
+          float sdy = suv.y - fY;
+          float stk = exp(-(sdx * sdx * 8.0 + sdy * sdy * 12.0)) * boltT;
+          float gnd = smoothstep(hz + 0.01, hz - 0.06, suv.y);
+          result   += vec3(0.88, 0.72, 1.00) * stk * gnd * 2.5;
+        }
+      }
+
+      return result;
+    }
+
     /* ── Main ───────────────────────────────────────────────────── */
     void main() {
       vec2  uv = gl_FragCoord.xy / u_res;
@@ -385,21 +468,48 @@
       col += vec3(0.80, 0.87, 1.00) * stars * starMask * 0.55 * mix(1.0, 0.40, u_mobile);
 
       /* ── Galaxy patches ──────────────────────────────────────────
-         Three blobs: wide Gaussian field drives both a soft diffuse
-         glow (primary visibility) and dense pinpoint stars on top.
-         The field also modulates density and star brightness so
-         both peak at the nucleus and fade naturally to the edge.
-
+         Seven blobs: round nuclei plus anisotropic (elongated)
+         blobs that suggest spiral arms and the galactic band.
          Gaussian exponents are low (3.5–9) so blobs span ≈20–35 %
          of screen width and are clearly visible.                   */
+
+      /* Round blobs — original three */
       float galG0 = exp(-dot(starUV - vec2(0.26, 0.74), starUV - vec2(0.26, 0.74)) *  5.0);
       float galG1 = exp(-dot(starUV - vec2(0.71, 0.81), starUV - vec2(0.71, 0.81)) *  3.5);
       float galG2 = exp(-dot(starUV - vec2(0.48, 0.91), starUV - vec2(0.48, 0.91)) *  9.0);
-      float galaxyField = clamp(galG0 + galG1 + galG2, 0.0, 1.0);
+
+      /* Elongated blobs — anisotropic Gaussians rotated to simulate
+         galactic structure (spiral arms / dust lanes).             */
+      /* galG3: left-side arm, tilted ~30° NE-SW */
+      vec2 dG3  = starUV - vec2(0.14, 0.83);
+      vec2 dG3r = vec2( dG3.x * 0.866 + dG3.y * 0.500,
+                       -dG3.x * 0.500 + dG3.y * 0.866);
+      float galG3 = exp(-(dG3r.x * dG3r.x *  3.5 + dG3r.y * dG3r.y * 22.0));
+
+      /* galG4: right-side arm, tilted ~-40° NW-SE */
+      vec2 dG4  = starUV - vec2(0.86, 0.86);
+      vec2 dG4r = vec2( dG4.x * 0.766 - dG4.y * 0.643,
+                        dG4.x * 0.643 + dG4.y * 0.766);
+      float galG4 = exp(-(dG4r.x * dG4r.x *  2.8 + dG4r.y * dG4r.y * 16.0));
+
+      /* galG5: small dense cluster mid-sky */
+      float galG5 = exp(-dot(starUV - vec2(0.60, 0.78), starUV - vec2(0.60, 0.78)) * 11.0);
+
+      /* galG6: long diagonal streak – the main galactic band */
+      vec2 dG6  = starUV - vec2(0.38, 0.80);
+      vec2 dG6r = vec2( dG6.x * 0.940 + dG6.y * 0.342,
+                       -dG6.x * 0.342 + dG6.y * 0.940);
+      float galG6 = exp(-(dG6r.x * dG6r.x *  1.2 + dG6r.y * dG6r.y * 28.0));
+
+      float galaxyField = clamp(
+          galG0 + galG1 + galG2
+        + galG3 * 0.80 + galG4 * 0.85
+        + galG5 * 0.90 + galG6 * 0.75,
+        0.0, 1.0);
 
       /* Diffuse glow – the visually dominant element.
          pow() steepens the falloff: bright core, quick fade.      */
-      col += vec3(0.62, 0.76, 1.00) * pow(galaxyField, 1.5) * starMask * 0.22 * mix(1.0, 0.40, u_mobile);
+      col += vec3(0.62, 0.76, 1.00) * pow(galaxyField, 1.5) * starMask * 0.28 * mix(1.0, 0.40, u_mobile);
 
       /* Dense pinpoint stars – gridSizes chosen so cells are
          ≥30 px wide on a 1920 px screen → stars always ≥1 px.
@@ -453,6 +563,9 @@
         + lightningContrib(sceneUV, hz, u_time, 63.47, iriPhase)
         + lightningContrib(sceneUV, hz, u_time, 89.13, iriPhase);
       col += ltContrib;
+
+      /* ── Click flash ─────────────────────────────────────────── */
+      col += clickFlash(sceneUV, hz);
 
       /* ── Film grain ──────────────────────────────────────────────
          Subtle animated noise strongest at the horizon and in the
@@ -528,9 +641,17 @@
   const uRes = gl.getUniformLocation(prog, 'u_res');
   const uTime = gl.getUniformLocation(prog, 'u_time');
   const uMouse = gl.getUniformLocation(prog, 'u_mouse');
-  const uIntro  = gl.getUniformLocation(prog, 'u_intro');
-  const uMobile = gl.getUniformLocation(prog, 'u_mobile');
+  const uIntro     = gl.getUniformLocation(prog, 'u_intro');
+  const uMobile    = gl.getUniformLocation(prog, 'u_mobile');
+  const uFlashPos  = gl.getUniformLocation(prog, 'u_flashPos');
+  const uFlashTime = gl.getUniformLocation(prog, 'u_flashTime');
+  const uFlashType = gl.getUniformLocation(prog, 'u_flashType');
   const isMobile = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+
+  /* Initialise flash to inactive */
+  gl.uniform2f(uFlashPos, 0.5, 0.5);
+  gl.uniform1f(uFlashTime, -1.0);
+  gl.uniform1f(uFlashType, 0.0);
 
   /* ── Mouse parallax ─────────────────────────────────────────────
      tX/tY  : raw normalised target  (range −0.5 … +0.5)
@@ -573,7 +694,30 @@
     if (introStartTime === null) introStartTime = performance.now();
   };
 
+  /* Flash state — written by window._saunaFlash, read each frame */
+  let flashPos  = [0.5, 0.5];
+  let flashTime = -1.0;
+  let flashType = 0.0;
+
+  window._saunaFlash = function (x, y, isGround) {
+    flashPos  = [x, y];
+    flashTime = (performance.now() - t0) * 0.001;
+    flashType = isGround ? 1.0 : 0.0;
+  };
+
+  let scene1Running = true;
+
+  window._saunaScene1Pause = function () { scene1Running = false; };
+  window._saunaScene1Resume = function () {
+    if (!scene1Running) {
+      scene1Running = true;
+      requestAnimationFrame(frame);
+    }
+  };
+
   function frame() {
+    if (!scene1Running) return;   /* paused — stop re-scheduling */
+
     const t = (performance.now() - t0) * 0.001;   /* seconds */
 
     /* Ease mouse toward target */
@@ -599,6 +743,9 @@
     gl.uniform2f(uMouse, eX, eY);
     gl.uniform1f(uIntro, introOff);
     gl.uniform1f(uMobile, isMobile ? 1.0 : 0.0);
+    gl.uniform2f(uFlashPos, flashPos[0], flashPos[1]);
+    gl.uniform1f(uFlashTime, flashTime);
+    gl.uniform1f(uFlashType, flashType);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     requestAnimationFrame(frame);
   }

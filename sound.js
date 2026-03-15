@@ -12,6 +12,7 @@
 
   let isPlaying = false;
   let activeRAFs = [];   /* all running fade loops, so we can cancel them */
+  let currentTrackFile = 'burial.mp3';
 
   const P = [
     { el: null, handoffSet: false },
@@ -19,9 +20,10 @@
   ];
 
   function buildPlayer(i) {
-    const el   = new Audio('burial.mp3');
+    const el   = new Audio(currentTrackFile);
     el.preload = 'auto';
     el.volume  = 0;
+    el.onerror = function () { isPlaying = false; };
     P[i] = { el, handoffSet: false };
   }
 
@@ -176,6 +178,67 @@
 
   /* Expose enable() so the overlay coordinator can call it          */
   window._saunaEnableSound = enable;
+
+  /* Switch to a different audio track (fails silently if file missing) */
+  window._saunaSetTrack = function (filename) {
+    if (filename === currentTrackFile) return;
+
+    const wasPlaying = isPlaying;
+
+    cancelAllFades();
+    P.forEach(function (p) {
+      if (!p.el) return;
+      p.el.ontimeupdate = null;
+      p.el.onerror      = null;
+      try { p.el.pause(); } catch (e) {}
+      p.el.src = '';
+    });
+
+    currentTrackFile = filename;
+    isPlaying = false;
+    buildPlayer(0);
+    buildPlayer(1);
+
+    if (wasPlaying) {
+      isPlaying = true;
+      const p = P[0];
+      p.el.volume = 0;
+      const prom = p.el.play();
+
+      function ftSetup() {
+        if (!isPlaying) return;
+        const dur = p.el.duration;
+        if (dur && isFinite(dur)) {
+          p.el.currentTime = dur * (0.10 + Math.random() * 0.55);
+        }
+        fadeVolume(p.el, 0, 1, FADE);
+        p.handoffSet = false;
+        p.el.ontimeupdate = function () {
+          if (!isPlaying || p.handoffSet) return;
+          if (p.el.duration - p.el.currentTime <= FADE + 0.3) {
+            p.handoffSet = true;
+            crossfade(0);
+          }
+        };
+      }
+
+      if (prom !== undefined) {
+        prom.then(function () {
+          if (p.el.readyState >= 1 && isFinite(p.el.duration)) {
+            ftSetup();
+          } else {
+            p.el.addEventListener('loadedmetadata', ftSetup, { once: true });
+          }
+        }).catch(function () { isPlaying = false; });
+      } else {
+        if (p.el.readyState >= 1 && isFinite(p.el.duration)) {
+          ftSetup();
+        } else {
+          p.el.addEventListener('loadedmetadata', ftSetup, { once: true });
+        }
+      }
+    }
+  };
 
   /* ── Autoplay probe ─────────────────────────────────────────────
      Try to play a silent clone of the audio file. If the browser
