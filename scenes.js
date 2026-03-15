@@ -180,13 +180,7 @@
     if (!oceanVideo) return;
     seekPending  = true;
     scrubCurrent = scrubTarget;
-    /* fastSeek jumps to the nearest keyframe — much faster decode than
-       currentTime which demands frame-accurate seek.                   */
-    if (oceanVideo.fastSeek) {
-      oceanVideo.fastSeek(scrubCurrent);
-    } else {
-      oceanVideo.currentTime = scrubCurrent;
-    }
+    oceanVideo.currentTime = scrubCurrent;
   }
 
   if (oceanVideo) {
