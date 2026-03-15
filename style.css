@@ -265,6 +265,8 @@ body[data-scene="3"] .grain-container {
    SAUNAGOTTO SUB-LOGO
    ============================================================ */
 .logo-sub {
+  position: relative;
+  left: -2px;
   width: clamp(130px, 24.3vw, 348px);
   height: auto;
   opacity: 1;

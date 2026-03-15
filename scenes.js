@@ -78,28 +78,19 @@
     goToScene(wrap(currentScene + 1));
   });
 
-  /* ── Scene 1: click / tap → lightning flash ──────────────────── */
-  window.addEventListener('click', function (e) {
+  /* ── Scene 1: mousedown / touchstart → lightning flash ─────────── */
+  window.addEventListener('mousedown', function (e) {
     if (currentScene !== 1) return;
-
-    /* Ignore clicks inside the 60 px nav zones */
     if (e.clientX < 60 || e.clientX > window.innerWidth - 60) return;
-
-    /* Convert browser coords → shader UV (y flipped, 0 = bottom) */
     const x = e.clientX / window.innerWidth;
     const y = 1.0 - (e.clientY / window.innerHeight);
-
-    /* Bottom half of screen = ground/surface area (browser y > 55 %) */
     const isGround = (e.clientY > window.innerHeight * 0.55) ? 1.0 : 0.0;
-
     window._saunaFlash && window._saunaFlash(x, y, isGround);
   });
 
-  /* Same for touch (touchend fires a click too, but belt-and-suspenders
-     for devices that suppress synthetic click on fast taps)           */
-  window.addEventListener('touchend', function (e) {
+  window.addEventListener('touchstart', function (e) {
     if (currentScene !== 1) return;
-    const t = e.changedTouches[0];
+    const t = e.touches[0];
     if (!t) return;
     if (t.clientX < 60 || t.clientX > window.innerWidth - 60) return;
     const x = t.clientX / window.innerWidth;
@@ -108,23 +99,70 @@
     window._saunaFlash && window._saunaFlash(x, y, isGround);
   }, { passive: true });
 
-  /* ── Scene 3: click / tap → coal steam ──────────────────────── */
-  window.addEventListener('click', function (e) {
+  /* ── Scene 3: hold → continuous steam, release → stop ──────────── */
+  let steamInterval = null;
+  let steamU = 0.5, steamV = 0.5;
+
+  function startSteam(clientX, clientY) {
+    if (clientX < 60 || clientX > window.innerWidth - 60) return;
+    steamU = clientX / window.innerWidth;
+    steamV = 1.0 - clientY / window.innerHeight;
+    window._saunaCoalSteam && window._saunaCoalSteam(steamU, steamV);
+    if (steamInterval) return;
+
+    /* Recursive setTimeout so each puff schedules the next with a fresh
+       delay sampled from a 120 BPM sine wave (period = 500 ms).
+       delay = 45 + 35 * sin(2π * t * 2)  →  range [10, 80] ms          */
+    function schedulePuff() {
+      var t = performance.now() * 0.001;
+      var delay = 45 + 35 * Math.sin(2 * Math.PI * 2 * t);
+      steamInterval = setTimeout(function () {
+        window._saunaCoalSteam && window._saunaCoalSteam(steamU, steamV);
+        schedulePuff();
+      }, delay);
+    }
+    schedulePuff();
+  }
+
+  function stopSteam() {
+    clearTimeout(steamInterval);
+    steamInterval = null;
+    window._saunaCoalSteamRelease && window._saunaCoalSteamRelease();
+  }
+
+  window.addEventListener('mousedown', function (e) {
     if (currentScene !== 3) return;
-    if (e.clientX < 60 || e.clientX > window.innerWidth - 60) return;
-    const u = e.clientX / window.innerWidth;
-    const v = 1.0 - e.clientY / window.innerHeight;  /* flip Y for shader UV */
-    window._saunaCoalSteam && window._saunaCoalSteam(u, v);
+    startSteam(e.clientX, e.clientY);
+  });
+  window.addEventListener('mousemove', function (e) {
+    if (currentScene === 3 && steamInterval) {
+      if (e.clientX >= 60 && e.clientX <= window.innerWidth - 60) {
+        steamU = e.clientX / window.innerWidth;
+        steamV = 1.0 - e.clientY / window.innerHeight;
+      }
+    }
+  });
+  window.addEventListener('mouseup', function () {
+    if (currentScene === 3) stopSteam();
   });
 
-  window.addEventListener('touchend', function (e) {
+  window.addEventListener('touchstart', function (e) {
     if (currentScene !== 3) return;
-    const touch = e.changedTouches[0];
+    const touch = e.touches[0];
     if (!touch) return;
-    if (touch.clientX < 60 || touch.clientX > window.innerWidth - 60) return;
-    const u = touch.clientX / window.innerWidth;
-    const v = 1.0 - touch.clientY / window.innerHeight;
-    window._saunaCoalSteam && window._saunaCoalSteam(u, v);
+    startSteam(touch.clientX, touch.clientY);
+  }, { passive: true });
+  window.addEventListener('touchmove', function (e) {
+    if (currentScene !== 3 || !steamInterval) return;
+    const touch = e.touches[0];
+    if (!touch) return;
+    if (touch.clientX >= 60 && touch.clientX <= window.innerWidth - 60) {
+      steamU = touch.clientX / window.innerWidth;
+      steamV = 1.0 - touch.clientY / window.innerHeight;
+    }
+  }, { passive: true });
+  window.addEventListener('touchend', function () {
+    if (currentScene === 3) stopSteam();
   }, { passive: true });
 
   /* ── Scene 2: pointer drag scrubs video ─────────────────────── */
@@ -142,7 +180,13 @@
     if (!oceanVideo) return;
     seekPending  = true;
     scrubCurrent = scrubTarget;
-    oceanVideo.currentTime = scrubCurrent;
+    /* fastSeek jumps to the nearest keyframe — much faster decode than
+       currentTime which demands frame-accurate seek.                   */
+    if (oceanVideo.fastSeek) {
+      oceanVideo.fastSeek(scrubCurrent);
+    } else {
+      oceanVideo.currentTime = scrubCurrent;
+    }
   }
 
   if (oceanVideo) {

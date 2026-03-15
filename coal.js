@@ -126,8 +126,9 @@
       col = mix(col, vec3(0.52, 0.03, 0.00), smoothstep(0.26, 0.41, fire));
       col = mix(col, vec3(0.90, 0.20, 0.00), smoothstep(0.41, 0.54, fire));
       col = mix(col, vec3(1.00, 0.52, 0.01), smoothstep(0.54, 0.65, fire));
-      col = mix(col, vec3(1.00, 0.80, 0.14), smoothstep(0.65, 0.77, fire));
-      col = mix(col, vec3(1.00, 0.97, 0.82), smoothstep(0.77, 0.92, fire));
+      col = mix(col, vec3(1.00, 0.80, 0.14), smoothstep(0.65, 0.76, fire));
+      col = mix(col, vec3(1.00, 0.97, 0.82), smoothstep(0.75, 0.88, fire));
+      col = mix(col, vec3(1.00, 1.00, 0.98), smoothstep(0.84, 0.98, fire));
 
       float gx  = floor(gl_FragCoord.x * 0.65);
       float gy  = floor(gl_FragCoord.y * 0.65);
@@ -312,6 +313,22 @@
       col += glowCol * rimFactor * glowStr;        /* fire rim glow           */
       col += glowCol * topGlow;                    /* top bleed on hot chunks */
 
+      /* ── Incandescent hot spots ──────────────────────────────────────
+         Double-layer FBM: coarse patch selection + fine spot detail.
+         Only appears on faces with high temperature (hottest coal bits).
+         shimmer gives a live flicker to each spot independently.        */
+      float hotN1  = fbm(v_worldPos.xz * 12.0 + vec2( t * 0.07,  t * 0.05));
+      float hotN2  = fbm(v_worldPos.xz * 31.0 + vec2(-t * 0.11,  t * 0.09) + 5.7);
+      float hotGate  = smoothstep(0.62, 0.92, temperature);
+      float hotPatch = smoothstep(0.48, 0.72, hotN1) * smoothstep(0.55, 0.80, hotN2);
+      float shimmer  = 0.78 + 0.22 * sin(t * 11.1 + v_worldPos.x * 13.7 + v_worldPos.z * 9.3);
+      float hotAmt   = hotGate * hotPatch * shimmer;
+      /* Wide warm-yellow pool — the glowing background of the spot   */
+      col = mix(col, vec3(1.00, 0.91, 0.62), hotAmt * 0.82);
+      /* Bright white core — the actual shiny specular point          */
+      float hotCore = smoothstep(0.64, 0.88, hotN2) * smoothstep(0.76, 1.00, temperature) * shimmer;
+      col += vec3(1.00, 0.98, 0.93) * hotCore * 3.2;
+
       /* ── Depth of Field alpha (Circle of Confusion) ─────────────
          Focal plane at y = 0.22 (base coal layer = sharpest).
          Distance above or below grows the CoC linearly then soft-clips.
@@ -384,7 +401,7 @@
   /* Alcatraz uses 80 samples.  Mobile gets 42 for perf.
      We define SAMPLES via a JS template literal so GLSL sees a constant —
      required for the loop bound in WebGL 1.0.                          */
-  const DOF_SAMPLES = isMobile ? 42 : 80;
+  const DOF_SAMPLES = isMobile ? 26 : 56;
 
   const DOF_VS = /* glsl */`
     varying vec2 v_uv;
@@ -451,7 +468,7 @@
 
   const dofUniforms = {
     u_tex:  { value: renderTarget.texture },
-    u_res:  { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+    u_res:  { value: new THREE.Vector2(Math.round(window.innerWidth * dpr), Math.round(window.innerHeight * dpr)) },
     u_time: { value: 0.0 },
   };
   const dofMesh  = new THREE.Mesh(
@@ -477,119 +494,131 @@
     void main() { v_uv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }
   `;
 
+  const MAX_STEAM = isMobile ? 16 : 32;
+
   const STEAM_FS = /* glsl */`
     precision highp float;
+    varying vec2  v_uv;
     uniform vec2  u_res;
-    uniform vec2  u_steamPos[4];
-    uniform float u_steamT[4];   /* elapsed seconds; negative = inactive */
+    uniform vec2  u_steamPos[${MAX_STEAM}];
+    uniform float u_steamT[${MAX_STEAM}];
+    uniform float u_steamRelAge[${MAX_STEAM}]; /* -1 = held, >=0 = secs since released */
+    uniform float u_steamSeed[${MAX_STEAM}];
 
-    float hash(vec2 p) {
-      p  = fract(p * vec2(127.1, 311.7));
-      p += dot(p, p + 19.19);
-      return fract(p.x * p.y);
-    }
-    float noise(vec2 p) {
-      vec2 i = floor(p), f = fract(p);
-      vec2 u = f * f * (3.0 - 2.0 * f);
-      return mix(
-        mix(hash(i),                hash(i + vec2(1.0, 0.0)), u.x),
-        mix(hash(i + vec2(0.0,1.0)), hash(i + vec2(1.0,1.0)), u.x), u.y
-      );
-    }
-    float fbm(vec2 p) {
-      float v = 0.0, a = 0.5;
-      for (int i = 0; i < 4; i++) {
-        v += a * noise(p);
-        p  = p * 2.1 + vec2(3.7, 8.1);
-        a *= 0.5;
-      }
-      return v;
-    }
-
-    /* One steam event: expanding ring of volumetric wisps.
-       Cartesian FBM warp avoids the polar-angle seam artifact.   */
-    vec4 oneSteam(vec2 fragUV, vec2 center, float t) {
-      if (t < 0.0 || t > 2.4) return vec4(0.0);
+    /* Domain-warped steam — same sin-warp + length-keyed rotation
+       structure as the reference smoke shader, adapted to 2-D screen
+       space.  seed shifts the phase field so each click looks unique. */
+    vec4 oneSteam(vec2 fragUV, vec2 center, float t, float relAge, float seed) {
+      if (t < 0.0 || t > 8.0) return vec4(0.0);
 
       float aspect = u_res.x / u_res.y;
-      /* Steam drifts upward over time */
-      vec2 d = (fragUV - (center + vec2(0.0, t * 0.030))) * vec2(aspect, 1.0);
-      float r = length(d);
 
-      /* ── Expanding ring ───────────────────────────────────── */
-      float ringR = t * 0.13;
+      /* Upward drift + slight seed-varied horizontal lean */
+      float leanX = (fract(seed * 4.17) - 0.5) * 0.022;
+      float leanY =  0.016 + fract(seed * 2.31) * 0.014;
+      vec2 d = (fragUV - center - vec2(leanX * t, leanY * t)) * vec2(aspect, 1.0);
 
-      /* Two-layer FBM in Cartesian space — warps the ring boundary
-         into organic lumps, no polar discontinuity.             */
-      float nwarp = fbm(d * 4.2 + vec2(t * 0.38, t * 0.55)) - 0.5;
-      float nint  = fbm(d * 5.8 + vec2(t * 0.62, 1.73));   /* interior texture */
+      /* Effect expands outward; scale varies per click using seed     */
+      float scaleF = 0.50 + fract(seed * 3.71) * 1.50;  /* 0.50 – 2.00× */
+      float expand = (0.04 + t * 0.085) * scaleF;
+      vec2  p      = d / expand;
+      float r      = length(p);
 
-      float warpedR   = ringR + nwarp * 0.052;
-      float ringW     = 0.048 + t * 0.020;
-      float frontDist = r - warpedR;
+      /* Outer radial envelope */
+      float env = smoothstep(2.6, 0.4, r);
+      if (env < 0.002) return vec4(0.0);
 
-      /* Density: leading edge + trailing wispy tail */
-      float dens = smoothstep(0.004, -ringW,           frontDist)
-                 * (1.0 - smoothstep(-ringW * 0.18, -ringW * 1.9, frontDist));
-      /* Interior noise breaks the ring into separate puffs */
-      dens *= 0.30 + 0.70 * nint;
+      /* ── Domain warp ──────────────────────────────────────────────
+         sin warps on both axes + length-keyed rotation per step.
+         Same structure as the reference: at each k, warp x and y
+         with cross-coupled sin(), then rotate by (time + |p|) angle.
+         seed * 7.31 shifts the entire phase field per click.        */
+      float time = t * 0.65 + seed * 7.31;
+      for (int k = 1; k <= 3; k++) {
+        float kf  = float(k);
+        float amp = 0.40 / kf;
+        p.x += sin((p.y + p.x * 0.5) * kf * 1.10 + time       ) * amp;
+        p.y += sin((p.x + p.y * 0.3) * kf * 0.85 + time * 1.12) * amp * 0.75;
+        float ang = time * 0.042 + length(p) * 0.065 + seed * 0.5;
+        float cs = cos(ang), sn = sin(ang);
+        p = vec2(cs * p.x - sn * p.y, sn * p.x + cs * p.y);
+      }
 
-      /* ── Central burst (immediate puff at t≈0) ───────────── */
-      float burst = smoothstep(0.05 + t * 0.07, 0.0, r) * exp(-t * 5.5);
-      dens = max(dens, burst);
+      /* ── Density (reference: sin(p.x)*.4+.5, then 1/dt) ─────────  */
+      float dt = sin(p.x) * 0.4 + 0.55;
+      dt = max(dt * (length(p) * 0.26 + 0.07), 0.016);
+      float brightness = clamp(0.065 / dt * env, 0.0, 1.0);
 
-      /* ── Colour ───────────────────────────────────────────── */
-      float edgeF = 1.0 - smoothstep(-ringW * 0.5, 0.0, frontDist);
+      /* ── Fade: brief in, fast while held, slow linger after release
+         While held (relAge < 0):  exp(-t * 2.2)                     fast ~0.5 s half-life
+         After release (relAge≥0): exp(-t*2.2 + relAge*1.8)          seamless → rate 0.4
+           At release (relAge=0) the two expressions are equal →  continuity guaranteed.
+           After: brightness decays from the release value at rate 0.4 (~2.5 s half-life). */
+      float fadeIn  = smoothstep(0.0, 0.18, t);
+      float fadeOut = (relAge < 0.0) ? exp(-t * 2.2)
+                                     : exp(-t * 2.2 + relAge * 1.8);
+      brightness *= fadeIn * fadeOut;
+
+      /* ── Colour: ember warmth at origin → cool white steam ──────  */
+      float warmth = exp(-length(d) * 7.0) * exp(-t * 2.8);
       vec3 col = mix(
-        vec3(0.62, 0.76, 0.90),   /* outer: cool grey-blue steam */
-        vec3(0.96, 0.98, 1.00),   /* inner: near-white           */
-        nint * 0.6 + edgeF * 0.4
+        vec3(0.68, 0.80, 0.91),   /* outer: cool grey-blue mist  */
+        vec3(0.96, 0.97, 0.99),   /* core:  near-white           */
+        clamp(brightness * 1.5, 0.0, 1.0)
       );
-      /* Warm coal-fire tint very close to origin */
-      col = mix(col, vec3(1.00, 0.70, 0.35),
-                exp(-r * 7.0) * exp(-t * 3.5) * 0.50);
+      col = mix(col, vec3(1.00, 0.60, 0.20), warmth * 0.50);
 
-      return vec4(col, clamp(dens * exp(-t * 1.55), 0.0, 0.85));
+      return vec4(col, clamp(brightness * 0.38, 0.0, 0.26));
     }
 
     void main() {
-      vec2 uv  = gl_FragCoord.xy / u_res;
+      /* Use geometry UV (0-1 screen space) so position is RT-resolution
+         independent. gl_FragCoord / u_res would also be 0-1 inside the RT,
+         but only v_uv is guaranteed to match the compositor's sampling UV. */
+      vec2 uv  = v_uv;
       vec4 acc = vec4(0.0);
-      vec4 s;
 
-      /* Unrolled — avoids GLSL ES 1 variable-index limitations */
-      s = oneSteam(uv, u_steamPos[0], u_steamT[0]);
-      acc.rgb += s.rgb * s.a * (1.0 - acc.a);  acc.a += s.a * (1.0 - acc.a);
-      s = oneSteam(uv, u_steamPos[1], u_steamT[1]);
-      acc.rgb += s.rgb * s.a * (1.0 - acc.a);  acc.a += s.a * (1.0 - acc.a);
-      s = oneSteam(uv, u_steamPos[2], u_steamT[2]);
-      acc.rgb += s.rgb * s.a * (1.0 - acc.a);  acc.a += s.a * (1.0 - acc.a);
-      s = oneSteam(uv, u_steamPos[3], u_steamT[3]);
-      acc.rgb += s.rgb * s.a * (1.0 - acc.a);  acc.a += s.a * (1.0 - acc.a);
+      for (int i = 0; i < ${MAX_STEAM}; i++) {
+        if (u_steamT[i] < 0.001) continue;   /* inactive slot — skip */
+        vec4 s = oneSteam(uv, u_steamPos[i], u_steamT[i], u_steamRelAge[i], u_steamSeed[i]);
+        acc.rgb += s.rgb * s.a * (1.0 - acc.a);
+        acc.a   += s.a * (1.0 - acc.a);
+      }
 
       gl_FragColor = vec4(acc.rgb, clamp(acc.a, 0.0, 1.0));
     }
   `;
 
-  const MAX_STEAM   = 4;
-  const steamT0arr  = new Array(MAX_STEAM).fill(-1.0);  /* start-time of each event */
-  const steamPosArr = Array.from({ length: MAX_STEAM }, function () {
+  const steamT0arr   = new Array(MAX_STEAM).fill(-1.0);
+  const steamRelT0arr = new Array(MAX_STEAM).fill(-1.0); /* absolute release time, -1 = still held */
+  const steamSeedArr = new Array(MAX_STEAM).fill(0.0);
+  const steamPosArr  = Array.from({ length: MAX_STEAM }, function () {
     return new THREE.Vector2(0.5, 0.5);
   });
   let steamSlot = 0;
 
   const steamUniforms = {
-    u_res:      { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
-    u_steamPos: { value: steamPosArr },
-    u_steamT:   { value: [-1.0, -1.0, -1.0, -1.0] },
+    u_res:        { value: new THREE.Vector2(Math.round(window.innerWidth * dpr * 0.25), Math.round(window.innerHeight * dpr * 0.25)) },
+    u_steamPos:   { value: steamPosArr },
+    u_steamT:     { value: new Array(MAX_STEAM).fill(-1.0) },
+    u_steamRelAge:{ value: new Array(MAX_STEAM).fill(-1.0) },
+    u_steamSeed:  { value: new Array(MAX_STEAM).fill(0.0)  },
   };
+  /* Steam renders to a half-resolution RT — 4× fewer pixels to shade.
+     The compositor blits it to screen at full res (steam is soft enough
+     that bilinear upscaling is invisible).                              */
+  let steamRT = makeRT(
+    Math.round(window.innerWidth  * dpr * 0.5),
+    Math.round(window.innerHeight * dpr * 0.5)
+  );
+
   const steamMesh = new THREE.Mesh(
     new THREE.PlaneGeometry(2, 2),
     new THREE.ShaderMaterial({
       uniforms:       steamUniforms,
       vertexShader:   STEAM_VS,
       fragmentShader: STEAM_FS,
-      transparent:    true,
+      blending:       THREE.NoBlending,   /* write directly to RT, no GL blend */
       depthWrite:     false,
       depthTest:      false,
     })
@@ -598,15 +627,51 @@
   const steamCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   steamScene.add(steamMesh);
 
+  /* Compositor: alpha-blends the half-res steam RT onto the screen.
+     Uses premultiplied blending (ONE, ONE_MINUS_SRC_ALPHA) because the
+     steam shader already stores pre-multiplied RGB in the accumulator. */
+  const compUniforms = { u_tex: { value: steamRT.texture } };
+  const compMesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(2, 2),
+    new THREE.ShaderMaterial({
+      uniforms:       compUniforms,
+      vertexShader:   STEAM_VS,
+      fragmentShader: /* glsl */`
+        precision mediump float;
+        uniform sampler2D u_tex;
+        varying vec2 v_uv;
+        void main() {
+          vec4 s = texture2D(u_tex, v_uv);
+          /* As steam density (alpha) builds from overlapping puffs,
+             drive the premultiplied RGB toward fully-white.
+             vec3(s.a) is the premultiplied value of pure white at this alpha. */
+          float whitePush = smoothstep(0.25, 0.80, s.a);
+          s.rgb = mix(s.rgb, vec3(s.a), whitePush);
+          gl_FragColor = s;
+        }
+      `,
+      transparent:    true,
+      blending:       THREE.CustomBlending,
+      blendEquation:  THREE.AddEquation,
+      blendSrc:       THREE.OneFactor,
+      blendDst:       THREE.OneMinusSrcAlphaFactor,
+      depthWrite:     false,
+      depthTest:      false,
+    })
+  );
+  const compScene = new THREE.Scene();
+  compScene.add(compMesh);
+
   // ====================================================================
   // RESIZE
   // ====================================================================
   function resize() {
     const w = window.innerWidth, h = window.innerHeight;
     renderer.setSize(w, h, false);
-    renderTarget.setSize(Math.round(w * dpr), Math.round(h * dpr));
-    dofUniforms.u_res.value.set(w, h);
-    steamUniforms.u_res.value.set(w, h);
+    renderTarget.setSize(Math.round(w * dpr),       Math.round(h * dpr));
+    steamRT.setSize    (Math.round(w * dpr * 0.5), Math.round(h * dpr * 0.5));
+    dofUniforms.u_res.value.set  (Math.round(w * dpr),       Math.round(h * dpr));
+    steamUniforms.u_res.value.set(Math.round(w * dpr * 0.5), Math.round(h * dpr * 0.5));
     aspect = w / h;
     camera.left = -VIEW * aspect; camera.right  =  VIEW * aspect;
     camera.top  =  VIEW;          camera.bottom = -VIEW;
@@ -647,20 +712,44 @@
     renderer.clear();
     renderer.render(dofScene, dofCamera);
 
-    /* Pass 3: Steam overlay (alpha-blended on top, no clear) */
+    /* Pass 3a: Steam → half-res steamRT (no screen blending, direct write) */
     const ste = steamUniforms.u_steamT.value;
+    const sra = steamUniforms.u_steamRelAge.value;
+    const ssd = steamUniforms.u_steamSeed.value;
     for (let i = 0; i < MAX_STEAM; i++) {
-      ste[i] = steamT0arr[i] < 0 ? -1.0 : t - steamT0arr[i];
+      ste[i] = steamT0arr[i]    < 0 ? -1.0 : t - steamT0arr[i];
+      sra[i] = steamRelT0arr[i] < 0 ? -1.0 : t - steamRelT0arr[i];
+      ssd[i] = steamSeedArr[i];
     }
+    renderer.setRenderTarget(steamRT);
+    renderer.setClearColor(0x000000, 0.0);
+    renderer.clear();
     renderer.render(steamScene, steamCamera);
+
+    /* Pass 3b: Composite half-res steam onto screen (premult alpha blend) */
+    renderer.setRenderTarget(null);
+    renderer.render(compScene, steamCamera);
 
     raf = requestAnimationFrame(frame);
   }
 
   window._saunaCoalSteam = function (u, v) {
-    steamT0arr[steamSlot]  = (performance.now() - t0) * 0.001;
+    steamT0arr[steamSlot]    = (performance.now() - t0) * 0.001;
+    steamRelT0arr[steamSlot] = -1.0;   /* mark as held (not yet released) */
+    steamSeedArr[steamSlot]  = Math.random() * 100.0;
     steamPosArr[steamSlot].set(u, v);
     steamSlot = (steamSlot + 1) % MAX_STEAM;
+  };
+
+  /* Called on mouseup/touchend — stamps a release time on all held puffs
+     so the shader can switch them to the slow-linger decay curve.       */
+  window._saunaCoalSteamRelease = function () {
+    const now = (performance.now() - t0) * 0.001;
+    for (let i = 0; i < MAX_STEAM; i++) {
+      if (steamT0arr[i] >= 0 && steamRelT0arr[i] < 0) {
+        steamRelT0arr[i] = now;
+      }
+    }
   };
 
   window._saunaSunPause  = function () {

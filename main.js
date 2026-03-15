@@ -65,9 +65,10 @@
     uniform vec2  u_mouse;   /* normalised offset: +x right, +y up [-0.5,0.5] */
     uniform float u_intro;   /* Y-offset added to hz: starts negative, eases to 0 */
     uniform float u_mobile;  /* 1.0 on touch devices, 0.0 on desktop            */
-    uniform vec2  u_flashPos;   /* UV of click (x 0-1, y 0=bottom)              */
+    uniform vec2  u_flashPos;    /* UV of click (x 0-1, y 0=bottom)             */
     uniform float u_flashTime;  /* u_time at click; negative = inactive         */
     uniform float u_flashType;  /* 0 = atmosphere only, 1 = bolt + atmosphere   */
+    uniform float u_flashBright; /* random brightness multiplier per click       */
 
     /* ── Noise ──────────────────────────────────────────────────── */
     float hash(vec2 p) {
@@ -327,55 +328,17 @@
       /* Brief full-sky wash */
       result += vec3(0.50, 0.42, 0.75) * boltT * 0.30 * skyMk;
 
-      /* ── Surface bolt (ground clicks only) ─────────────────────
-         Jagged bolt from horizon down to click Y.               */
+      /* ── Ground impact burst (ground clicks only, no bolt) ──────
+         Soft radial glow at the strike point + surface spread.    */
       if (u_flashType > 0.5) {
-        float boltTop  = hz - 0.01;
-        float boltBot  = fY;
-        float bh       = boltTop - boltBot;
-
-        if (bh > 0.02) {
-          float segH     = bh / 28.0;
-          float boltDist = 1000.0;
-          vec2  prevPt   = vec2(fX, boltTop);
-
-          for (int k = 0; k < 28; k++) {
-            float fk   = float(k);
-            float amp  = 0.5 + hash(vec2(fk * 3.73 + u_flashTime, 15.1)) * 1.5;
-            float defl = (hash(vec2(fk * 7.31, u_flashTime + 10.3)) - 0.5) * 0.020 * amp;
-            vec2  nPt  = vec2(prevPt.x + defl, prevPt.y - segH);
-
-            vec2  ab  = nPt - prevPt;
-            vec2  ap  = suv - prevPt;
-            float tSg = clamp(dot(ap, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
-            boltDist  = min(boltDist, length(ap - tSg * ab));
-            prevPt    = nPt;
-          }
-
-          float inB   = step(boltBot, suv.y) * step(suv.y, boltTop);
-          float relY  = clamp((boltTop - suv.y) / bh, 0.0, 1.0);
-          float taper = sin(relY * 3.14159);
-
-          float boltL = (smoothstep(0.0006, 0.00005, boltDist)
-                       + smoothstep(0.0025, 0.0002,  boltDist) * 0.22)
-                       * taper * inB * boltT;
-          float bHalo = (exp(-boltDist * 20.0) * 0.60
-                       + exp(-boltDist *  5.5) * 0.30)
-                       * taper * inB * boltT;
-
-          result += vec3(0.92, 0.88, 1.00) * boltL * 2.5;
-          result += vec3(0.60, 0.48, 0.88) * bHalo;
-
-          /* Ground impact burst */
-          float sdx = suv.x - fX;
-          float sdy = suv.y - fY;
-          float stk = exp(-(sdx * sdx * 8.0 + sdy * sdy * 12.0)) * boltT;
-          float gnd = smoothstep(hz + 0.01, hz - 0.06, suv.y);
-          result   += vec3(0.88, 0.72, 1.00) * stk * gnd * 2.5;
-        }
+        float sdx = suv.x - fX;
+        float sdy = suv.y - fY;
+        float stk = exp(-(sdx * sdx * 8.0 + sdy * sdy * 12.0)) * boltT;
+        float gnd = smoothstep(hz + 0.01, hz - 0.06, suv.y);
+        result += vec3(0.88, 0.72, 1.00) * stk * gnd * 2.5;
       }
 
-      return result;
+      return result * u_flashBright;
     }
 
     /* ── Main ───────────────────────────────────────────────────── */
@@ -643,15 +606,17 @@
   const uMouse = gl.getUniformLocation(prog, 'u_mouse');
   const uIntro     = gl.getUniformLocation(prog, 'u_intro');
   const uMobile    = gl.getUniformLocation(prog, 'u_mobile');
-  const uFlashPos  = gl.getUniformLocation(prog, 'u_flashPos');
-  const uFlashTime = gl.getUniformLocation(prog, 'u_flashTime');
-  const uFlashType = gl.getUniformLocation(prog, 'u_flashType');
+  const uFlashPos    = gl.getUniformLocation(prog, 'u_flashPos');
+  const uFlashTime   = gl.getUniformLocation(prog, 'u_flashTime');
+  const uFlashType   = gl.getUniformLocation(prog, 'u_flashType');
+  const uFlashBright = gl.getUniformLocation(prog, 'u_flashBright');
   const isMobile = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
 
   /* Initialise flash to inactive */
   gl.uniform2f(uFlashPos, 0.5, 0.5);
   gl.uniform1f(uFlashTime, -1.0);
   gl.uniform1f(uFlashType, 0.0);
+  gl.uniform1f(uFlashBright, 1.0);
 
   /* ── Mouse parallax ─────────────────────────────────────────────
      tX/tY  : raw normalised target  (range −0.5 … +0.5)
@@ -695,14 +660,16 @@
   };
 
   /* Flash state — written by window._saunaFlash, read each frame */
-  let flashPos  = [0.5, 0.5];
-  let flashTime = -1.0;
-  let flashType = 0.0;
+  let flashPos    = [0.5, 0.5];
+  let flashTime   = -1.0;
+  let flashType   = 0.0;
+  let flashBright = 1.0;
 
   window._saunaFlash = function (x, y, isGround) {
-    flashPos  = [x, y];
-    flashTime = (performance.now() - t0) * 0.001;
-    flashType = isGround ? 1.0 : 0.0;
+    flashPos    = [x, y];
+    flashTime   = (performance.now() - t0) * 0.001;
+    flashType   = isGround ? 1.0 : 0.0;
+    flashBright = 0.30 + Math.random() * 0.70;  /* 0.30–1.0, same range as random bolts */
   };
 
   let scene1Running = true;
@@ -746,6 +713,7 @@
     gl.uniform2f(uFlashPos, flashPos[0], flashPos[1]);
     gl.uniform1f(uFlashTime, flashTime);
     gl.uniform1f(uFlashType, flashType);
+    gl.uniform1f(uFlashBright, flashBright);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     requestAnimationFrame(frame);
   }
