@@ -12,8 +12,8 @@
   <!-- WebGL heat haze renders here (fixed, behind everything) -->
   <canvas id="bg"></canvas>
 
-  <!-- Scene 2: ocean video fullscreen cover -->
-  <video id="ocean-video" src="ocean.mp4" autoplay loop muted playsinline></video>
+  <!-- Scene 2: JPEG frame scrubber canvas -->
+  <canvas id="ocean-canvas"></canvas>
 
   <!-- Scene 3: WebGL sun shader canvas -->
   <canvas id="sun-bg"></canvas>
@@ -65,6 +65,8 @@
     <span class="overlay-text">ELEVATE &#9775; BALANCE</span>
   </div>
 
+  <script src="gyro.js"></script>
+  <script src="ocean.js"></script>
   <script src="main.js"></script>
   <script src="coal.js"></script>
   <script src="sound.js"></script>
@@ -90,6 +92,7 @@
       /* Tap / click: also triggers sound (autoplay path handles it separately) */
       overlay.addEventListener('click', function () {
         window._saunaEnableSound && window._saunaEnableSound();
+        window._gyroRequestPermission && window._gyroRequestPermission();
         startExperience();
       });
 

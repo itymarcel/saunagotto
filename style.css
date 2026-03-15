@@ -33,7 +33,7 @@ body.no-webgl {
    SCENE BACKGROUNDS  (fixed, behind everything, scene-switched)
    ============================================================ */
 #bg,
-#ocean-video,
+#ocean-canvas,
 #sun-bg {
   position: fixed;
   inset: 0;
@@ -48,10 +48,9 @@ body[data-scene="3"] #sun-bg      { display: block; }
 
 /* iOS Safari requires the video element to stay in the rendering pipeline
    (not display:none) so it can buffer and play. Use visibility instead.  */
-#ocean-video                       { display: block; visibility: hidden; pointer-events: none; }
-body[data-scene="2"] #ocean-video  { visibility: visible; pointer-events: auto; }
+#ocean-canvas                       { display: block; visibility: hidden; pointer-events: none; }
+body[data-scene="2"] #ocean-canvas  { visibility: visible; pointer-events: auto; }
 
-#ocean-video { object-fit: cover; }
 
 /* ============================================================
    SCENE TRANSITION OVERLAY  (TV-noise snap between scenes)

@@ -7,7 +7,6 @@
   const transition  = document.getElementById('scene-transition');
   const noiseCanvas = document.getElementById('transition-noise');
   const noiseCtx    = noiseCanvas.getContext('2d');
-  const oceanVideo  = document.getElementById('ocean-video');
 
   /* ── TV-noise engine ─────────────────────────────────────────── */
   let noiseRAF = null;
@@ -57,11 +56,8 @@
 
       window._saunaSetTrack && window._saunaSetTrack(SCENE_TRACKS[n]);
 
-      /* Defer play() to next frame so iOS Safari has applied the
-         visibility change before we ask the video to render.     */
-      if (n === 2 && oceanVideo) requestAnimationFrame(function () {
-        oceanVideo.play().catch(function () {});
-      });
+      if (n === 2) { window._oceanPlay  && window._oceanPlay();  }
+      else         { window._oceanPause && window._oceanPause(); }
 
       currentScene = n;
     }, 250);
@@ -169,51 +165,30 @@
     if (currentScene === 3) stopSteam();
   }, { passive: true });
 
-  /* ── Scene 2: pointer drag scrubs video ─────────────────────── */
-  let scrubbing    = false;
-  let scrubLastX   = 0;
-  let scrubTarget  = 0;
-  let scrubCurrent = 0;
-  let seekPending  = false;
-  const SCRUB_SPX  = 0.04; /* seconds per pixel of drag */
-
-  /* Only one seek in-flight at a time. When it lands, immediately
-     seek to the latest target (skipping any intermediate positions).
-     This prevents the decoder backlog that causes lag on fast moves. */
-  function doSeek() {
-    if (!oceanVideo) return;
-    seekPending  = true;
-    scrubCurrent = scrubTarget;
-    oceanVideo.currentTime = scrubCurrent;
-  }
-
-  if (oceanVideo) {
-    oceanVideo.addEventListener('seeked', function () {
-      seekPending = false;
-      if (scrubbing && scrubTarget !== scrubCurrent) doSeek();
-    });
-  }
+  /* ── Scene 2: drag scrubs JPEG frame sequence ───────────────── */
+  let scrubbing  = false;
+  let scrubLastX = 0;
+  let scrubPos   = 0;    /* fractional frame position for smooth sub-frame drag */
+  const SCRUB_FPX = 1.0; /* frames advanced per pixel of drag (24 fps)         */
 
   function onScrubStart(clientX) {
-    if (currentScene !== 2 || !oceanVideo) return;
-    scrubbing    = true;
-    scrubLastX   = clientX;
-    scrubTarget  = oceanVideo.currentTime;
-    scrubCurrent = oceanVideo.currentTime;
-    oceanVideo.pause();
+    if (currentScene !== 2) return;
+    scrubbing  = true;
+    scrubLastX = clientX;
+    scrubPos   = (window._oceanFrame && window._oceanFrame()) || 0;
+    window._oceanPause && window._oceanPause();
   }
   function onScrubMove(clientX) {
-    if (!scrubbing || !oceanVideo) return;
-    const dur   = oceanVideo.duration || 60;
-    const delta = (clientX - scrubLastX) * SCRUB_SPX;
+    if (!scrubbing) return;
+    const total = (window._oceanTotalFrames) || 1;
+    scrubPos   += (clientX - scrubLastX) * SCRUB_FPX;
     scrubLastX  = clientX;
-    const raw   = scrubTarget + delta;
-    scrubTarget = ((raw % dur) + dur) % dur;   /* infinite wrap */
-    if (!seekPending) doSeek();
+    scrubPos    = ((scrubPos % total) + total) % total;  /* infinite wrap */
+    window._oceanSeek && window._oceanSeek(scrubPos | 0);
   }
   function onScrubEnd() {
     scrubbing = false;
-    if (oceanVideo) oceanVideo.play().catch(function () {});
+    window._oceanPlay && window._oceanPlay();
   }
 
   /* Mouse */
@@ -240,6 +215,41 @@
   window.addEventListener('touchend', function () {
     if (currentScene === 2) onScrubEnd();
   }, { passive: true });
+
+  /* ── Gyro scrub for Scene 2 ─────────────────────────────────────
+     When the phone is tilted left/right (gamma), the ocean scrubs.
+     Past a small dead-zone: pause autoplay and drive frame by tilt.
+     Return to level: resume autoplay.                              */
+  var lastGyroNow  = performance.now();
+  var gyroScrubPos = 0;
+  var gyroTilted   = false;
+
+  (function gyroTick(now) {
+    requestAnimationFrame(gyroTick);
+    var dt = Math.min((now - lastGyroNow) * 0.001, 0.1);
+    lastGyroNow = now;
+
+    if (currentScene !== 2 || scrubbing || !window._gyro || !window._gyro.active()) {
+      if (gyroTilted && currentScene !== 2) gyroTilted = false;
+      return;
+    }
+
+    var g = window._gyro.gamma();
+    if (Math.abs(g) > 0.08) {
+      if (!gyroTilted) {
+        gyroTilted   = true;
+        gyroScrubPos = (window._oceanFrame && window._oceanFrame()) || 0;
+        window._oceanPause && window._oceanPause();
+      }
+      var total = window._oceanTotalFrames || 1;
+      gyroScrubPos += g * 40 * dt;
+      gyroScrubPos  = ((gyroScrubPos % total) + total) % total;
+      window._oceanSeek && window._oceanSeek(gyroScrubPos | 0);
+    } else if (gyroTilted) {
+      gyroTilted = false;
+      window._oceanPlay && window._oceanPlay();
+    }
+  }(performance.now()));
 
   /* Initial scene */
   document.body.dataset.scene = '1';

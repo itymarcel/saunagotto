@@ -689,9 +689,11 @@
     if (!sunRunning) return;
     const t = (performance.now() - t0) * 0.001;
 
-    /* Camera: gentle side-to-side oscillation over the coal bed */
-    const camX = Math.sin(t * 0.018) * 6.5;
-    const camZ = 2.8 + Math.sin(t * 0.031 + 1.0) * 0.45;
+    /* Camera: gentle oscillation + gyro drift on mobile */
+    const gyroX = (window._gyro && window._gyro.active()) ? window._gyro.gamma() * 2.5 : 0;
+    const gyroZ = (window._gyro && window._gyro.active()) ? window._gyro.beta()  * 1.5 : 0;
+    const camX = Math.sin(t * 0.018) * 6.5 + gyroX;
+    const camZ = 2.8 + Math.sin(t * 0.031 + 1.0) * 0.45 + gyroZ;
     camera.position.set(camX, 11, camZ);
     camera.lookAt(camX, 0, 0);
     floorMesh.position.x = camX;
